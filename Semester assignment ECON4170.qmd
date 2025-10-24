@@ -12,4 +12,24 @@ execute:
 
 this is a semester project where we will be making a model to see if we can predict the price of electricity in Norway, one day (24 hours) ahead of time. we want to create a model that beats the naive benchmark.
 
+## Data
+
+the data that we will be using comes from ENTSO-E. we have gotten a yearly report for this year (up to the 27th of October) with the time between measurements being every 15 minutes, across an entire 24-hour period. its an excel file (CSV). the original currency that is displayed in the excel file is in EUR.
+
+we will transform this data to fit our needs as we go. to start, we will be adding a new collumn that converts the currency and price, to something that displays NOK. To do this, we will use todays current exchange rate. (11,68 NOK per EUR, as of the 26th of October 2025)
+
 ## Running Code
+
+```{r}
+
+library(tidyverse)
+library(janitor)
+
+ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
+  mutate(ELP_NOK = as.numeric("Day-ahead Price (EUR/MWh)") * 11.68)
+
+
+head(ELP)
+
+
+```
