@@ -47,15 +47,15 @@ ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
     lag_month = lag(Price_NOK, 730)) # by month
 
 
-head(ELP)
+head(ELP) 
 
 
-## other vaiables: water reservior levels and temprature history and load
+## other vaiables: water reservior levels and temprature history
 
 Total_load <- readr::read_csv("GUI_TOTAL_LOAD_DAYAHEAD_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
-    hour_demand = dmy_hm (sub("- .*","",mtu_cet_cest)),
+    hour_demand = dmy_hm(sub("- .*","",mtu_cet_cest)),
     load = actual_total_load_mw) %>%
   select(hour_demand, load)
 
@@ -78,7 +78,7 @@ reservior_hourly <- ELP %>%
   fill(Energy, .direction = "down") %>%
   fill(Energy, .direction = "up")
 
-head(reservior_hourly) 
+head(reservior_hourly)
 
 
 ```
@@ -94,7 +94,13 @@ temp_NO1$Stasjon<- NULL
 temp_NO1<- temp_NO1%>%
   rename(Tid = Tid.norsk.normaltid.)
 
-temp_NO1 %>%
+temp_NO1<-temp_NO1%>%
+  mutate(Lufttemperatur = gsub(",", ".",Lufttemperatur))
+
+temp_NO1$Lufttemperatur<- as.numeric(temp_NO1$Lufttemperatur)
+
+AvgTempNO1<-temp_NO1 %>%
 group_by(Tid) %>%
-  summarize(AvgTempNO1 = mean(Lufttemperatur))
+  summarize(AvgTempNO1 = mean(Lufttemperatur, na.rm = TRUE))%>%
+  drop_na()
 ```
