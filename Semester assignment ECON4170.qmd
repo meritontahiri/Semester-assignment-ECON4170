@@ -67,6 +67,7 @@ head(Total_load)
 ```{r}
 #Data Wrangling lufttemperatur#
 library(tidyverse)
+#Read 
 temp_NO1 <- read.csv("Lufttemperatur_NO1.csv", sep = ";")
 
 temp_NO1$Stasjon<- NULL
