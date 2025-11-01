@@ -63,3 +63,18 @@ head(Total_load)
 
 
 ```
+
+```{r}
+#Data Wrangling lufttemperatur#
+library(tidyverse)
+temp_NO1 <- read.csv("Lufttemperatur_NO1.csv", sep = ";")
+
+temp_NO1$Stasjon<- NULL
+
+temp_NO1<- temp_NO1%>%
+  rename(Tid = Tid.norsk.normaltid.)
+
+temp_NO1 %>%
+group_by(Tid) %>%
+  summarize(AvgTempNO1 = mean(Lufttemperatur))
+```
