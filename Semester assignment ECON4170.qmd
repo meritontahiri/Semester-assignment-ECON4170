@@ -32,10 +32,10 @@ ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
     Price_time = dmy_hms(sub("- .*","",mtu_cet_cest)),
-    hour_price = floor_date(Price_time, "hour"), #setting the intervals to every hour
+    hourly_time = floor_date(Price_time, "hour"), #setting the intervals to every hour
     Price_EUR = day_ahead_price_eur_m_wh,
     Price_NOK = Price_EUR * 11.68) %>%
-  group_by(hour_price) %>%
+  group_by(hourly_time) %>%
   summarise(
     Price_EUR = mean(Price_EUR, na.rm = TRUE),
     Price_NOK = mean(Price_NOK, na.rm = TRUE), 
@@ -47,19 +47,38 @@ ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
     lag_month = lag(Price_NOK, 730)) # by month
 
 
-head(ELP) 
+head(ELP)
 
 
-## other vaiables: water reservior levels and temprature history
+## other vaiables: water reservior levels and temprature history and load
 
 Total_load <- readr::read_csv("GUI_TOTAL_LOAD_DAYAHEAD_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
-    hour_demand = dmy_hm(sub("[/\\-] .*","",mtu_cet_cest)),
+    hour_demand = dmy_hm (sub("- .*","",mtu_cet_cest)),
     load = actual_total_load_mw) %>%
   select(hour_demand, load)
 
 head(Total_load)
+
+# water reservior levels
+
+reservior_Weekly <- readr::read_csv("GUI_WATER_RESERVOIRS_HYDRO_STORAGE_202412312300-202512312300.csv") %>% 
+  clean_names() %>%
+  separate(time_interval, c("start", "end"), sep = "- .*") %>%
+  transmute(
+    hourly_time = as.POSIXct(dmy(start)),
+    Energy = parse_number(energy_m_wh)) %>%
+  arrange(hourly_time)
+
+reservior_hourly <- ELP %>%
+  select(hourly_time) %>%
+  left_join(reservior_Weekly, by = "hourly_time") %>%
+  arrange(hourly_time) %>%
+  fill(Energy, .direction = "down") %>%
+  fill(Energy, .direction = "up")
+
+head(reservior_hourly) 
 
 
 ```
@@ -74,13 +93,7 @@ temp_NO1$Stasjon<- NULL
 temp_NO1<- temp_NO1%>%
   rename(Tid = Tid.norsk.normaltid.)
 
-temp_NO1<-temp_NO1%>%
-  mutate(Lufttemperatur = gsub(",", ".",Lufttemperatur))
-
-temp_NO1$Lufttemperatur<- as.numeric(temp_NO1$Lufttemperatur)
-
-AvgTempNO1<-temp_NO1 %>%
+temp_NO1 %>%
 group_by(Tid) %>%
-  summarize(AvgTempNO1 = mean(Lufttemperatur, na.rm = TRUE))%>%
-  drop_na()
+  summarize(AvgTempNO1 = mean(Lufttemperatur))
 ```
