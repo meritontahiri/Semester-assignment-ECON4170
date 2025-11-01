@@ -31,8 +31,8 @@ library(lubridate) #found in syllabus
 ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
-    Price_time = dmy_hms(sub("- .*","",mtu_cet_cest)),
-    hour_price = floor_date(Price_time, "hour"), #setting the intervals to every hour
+    Price_time = dmy_hms(mtu_cet_cest),
+    hour_price = floor_date(mtu_cet_cest, "hour"), #setting the intervals to every hour
     Price_EUR = day_ahead_price_eur_m_wh,
     Price_NOK = Price_EUR * 11.68) %>%
   group_by(hour_price) %>%
@@ -47,19 +47,29 @@ ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
     lag_month = lag(Price_NOK, 730)) # by month
 
 
-head(ELP) 
+head(ELP)
 
 
-## other vaiables: water reservior levels and temprature history
+## other vaiables: water reservior levels and temprature history and load
 
 Total_load <- readr::read_csv("GUI_TOTAL_LOAD_DAYAHEAD_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
-    hour_demand = dmy_hm(sub("[/\\-] .*","",mtu_cet_cest)),
+    hour_demand = dmy_hm (sub("- .*","",mtu_cet_cest)),
     load = actual_total_load_mw) %>%
   select(hour_demand, load)
 
 head(Total_load)
+
+# water reservior levels
+
+reservior_levels <- readr::read_csv("GUI_WATER_RESERVOIRS_HYDRO_STORAGE_202412312300-202512312300.csv") %>%
+  clean_names() %>%
+  
+
+head(reservior_levels)
+  
+  
 
 
 ```
