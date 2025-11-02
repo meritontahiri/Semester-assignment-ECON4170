@@ -28,6 +28,7 @@ library(tidyverse) #standard package for most projects in this course
 library(janitor) #used by professor in seminar 5 solution
 library(lubridate) #found in syllabus
 
+
 ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
@@ -43,11 +44,7 @@ ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
   mutate( 
     lag_hour = lag(Price_NOK, 1), # adding lags to the electricity price
     lag_day = lag(Price_NOK, 24), # by day (24 hours)
-    lag_week = lag(Price_NOK, 168), # by week
-    lag_month = lag(Price_NOK, 730)) # by month
-
-
-head(ELP) 
+    lag_week = lag(Price_NOK, 168)) # by week
 
 
 ## other vaiables: water reservior levels and temprature history
@@ -55,11 +52,9 @@ head(ELP)
 Total_load <- readr::read_csv("GUI_TOTAL_LOAD_DAYAHEAD_202412312300-202512312300.csv") %>%
   clean_names() %>%
   mutate(
-    hour_demand = dmy_hm(sub("- .*","",mtu_cet_cest)),
+    hourly_time = dmy_hm(sub("- .*","",mtu_cet_cest)),
     load = actual_total_load_mw) %>%
-  select(hour_demand, load)
-
-head(Total_load)
+  select(hourly_time, load)
 
 # water reservior levels
 
@@ -78,7 +73,16 @@ reservior_hourly <- ELP %>%
   fill(Energy, .direction = "down") %>%
   fill(Energy, .direction = "up")
 
-head(reservior_hourly)
+
+#alligning the dates, so that there is no NA values or other data that can effect our models ability to predict. 
+
+cor(ELP$Price_NOK, ELP$lag_hour, use = "complete.obs")
+cor(ELP$Price_NOK, ELP$lag_day, use = "complete.obs")
+cor(ELP$Price_NOK, ELP$lag_week, use = "complete.obs")
+
+ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) +
+  geom_line() +
+  labs(title = "Electricity prices (hourly)")
 
 ```
 
@@ -108,6 +112,7 @@ AvgTempNO1<-temp_NO1 %>%
 group_by(time) %>%
   summarize(AvgTempNO1 = mean(Lufttemperatur, na.rm = TRUE))%>%
   drop_na()
+
 ```
 
 ```{r}
