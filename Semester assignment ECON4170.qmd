@@ -89,23 +89,73 @@ ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) +
 ```{r}
 #Data Wrangling lufttemperatur#
 library(tidyverse)
-#
+#reading the data set for temperature in NO1#
 temp_NO1 <- read.csv("Lufttemperatur_NO1.csv", sep = ";")
 
+#Removing the station column as its not needed##
 temp_NO1$Stasjon<- NULL
 
+#renaming column and time format for merging later##
 temp_NO1<- temp_NO1%>%
-  rename(Tid = Tid.norsk.normaltid.)
+  rename(time = Tid.norsk.normaltid.)%>%
+  mutate(time = as.POSIXct(time, format = "%d.%m.%Y %H:%M"))
 
+#substituting "," for "." in the temprature column to make numereic##
 temp_NO1<-temp_NO1%>%
   mutate(Lufttemperatur = gsub(",", ".",Lufttemperatur))
 
+#making the column numeric#
 temp_NO1$Lufttemperatur<- as.numeric(temp_NO1$Lufttemperatur)
 
+#creating avgtem by grouping with time and taking the mean at each timestamp#
 AvgTempNO1<-temp_NO1 %>%
-group_by(Tid) %>%
+group_by(time) %>%
   summarize(AvgTempNO1 = mean(Lufttemperatur, na.rm = TRUE))%>%
   drop_na()
 
 ```
 
+```{r}
+library(lubridate)
+library(tidyverse)
+##arranging and fixing to merge the files##
+price <- ELP 
+supply_water <- reservior_hourly
+demand <- Total_load
+temperature<- AvgTempNO1
+
+#renaming and removing coloumns in supply, price and demand##
+supply_water<-supply_water%>%
+  rename(time = hourly_time)
+
+price<-price%>%
+  rename(time = hourly_time)%>%
+  select(time, Price_NOK)
+
+demand<- demand %>%
+  rename(time = hour_demand)
+
+#need to remove first row from supply, water and demand to fit the time window of temperature#
+supply_water<-supply_water[-1,]
+demand<- demand [-1,]
+price<-price[-1,]
+
+#merging the data#
+model_data <- temperature %>%
+  inner_join(price,by = "time")%>%
+  inner_join(supply_water, by = "time")%>%
+  inner_join(demand, by = "time")
+
+#convert timezpne to oslo##
+
+model_data<- model_data%>%
+  mutate(time = with_tz(time, "CET"))
+
+#set end timestamp of data to 25.10.25 23:00 because of timechange on the 26th makes data not aligned so it saves trouble ending a few days earlier#
+
+library(dplyr)
+
+model_data <- model_data %>% 
+  filter(time <= "2025-10-25 23:00:00")
+
+```
