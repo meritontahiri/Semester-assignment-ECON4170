@@ -40,12 +40,7 @@ ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
   summarise(
     Price_EUR = mean(Price_EUR, na.rm = TRUE),
     Price_NOK = mean(Price_NOK, na.rm = TRUE), 
-    .groups = "drop") %>%
-  mutate( 
-    lag_hour = lag(Price_NOK, 1), # adding lags to the electricity price
-    lag_day = lag(Price_NOK, 24), # by day (24 hours)
-    lag_week = lag(Price_NOK, 168)) # by week
-
+    .groups = "drop")
 
 ## other vaiables: water reservior levels and temprature history
 
@@ -74,13 +69,7 @@ reservior_hourly <- ELP %>%
   fill(Energy, .direction = "up")
 
 
-#alligning the dates, so that there is no NA values or other data that can effect our models ability to predict. 
-
-cor(ELP$Price_NOK, ELP$lag_hour, use = "complete.obs")
-cor(ELP$Price_NOK, ELP$lag_day, use = "complete.obs")
-cor(ELP$Price_NOK, ELP$lag_week, use = "complete.obs")
-
-ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) +
+ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) + #ggplot to check up on the data
   geom_line() +
   labs(title = "Electricity prices (hourly)")
 
@@ -89,7 +78,7 @@ ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) +
 ```{r}
 #Data Wrangling lufttemperatur#
 library(tidyverse)
-#reading the data set for temperature in NO1#
+# reading the data set for temperature in NO1#
 temp_NO1 <- read.csv("Lufttemperatur_NO1.csv", sep = ";")
 
 #Removing the station column as its not needed##
@@ -104,7 +93,7 @@ temp_NO1<- temp_NO1%>%
 temp_NO1<-temp_NO1%>%
   mutate(Lufttemperatur = gsub(",", ".",Lufttemperatur))
 
-#making the column numeric#
+#aking the column numeric#
 temp_NO1$Lufttemperatur<- as.numeric(temp_NO1$Lufttemperatur)
 
 #creating avgtem by grouping with time and taking the mean at each timestamp#
@@ -118,7 +107,7 @@ group_by(time) %>%
 ```{r}
 library(lubridate)
 library(tidyverse)
-##arranging and fixing to merge the files##
+#arranging and fixing to merge the files##
 price <- ELP 
 supply_water <- reservior_hourly
 demand <- Total_load
@@ -133,7 +122,8 @@ price<-price%>%
   select(time, Price_NOK)
 
 demand<- demand %>%
-  rename(time = hour_demand)
+  rename(time = hourly_time, demand = load)%>%
+  mutate(demand = as.numeric(demand))
 
 #need to remove first row from supply, water and demand to fit the time window of temperature#
 supply_water<-supply_water[-1,]
@@ -157,5 +147,74 @@ library(dplyr)
 
 model_data <- model_data %>% 
   filter(time <= "2025-10-25 23:00:00")
+
+model_data_winsorized <- model_data %>%
+  mutate(
+    across(where(is.numeric), ~ {
+    low <- quantile(.x, 0.01, na.rm = TRUE)
+    high <- quantile(.x, 0.99, na.rm = TRUE)
+    pmin(pmax(.x, low), high)}))
+
+
+ggplot(model_data_winsorized, aes(x = time, y = Price_NOK)) +
+  geom_line(size = 0.45)
+ggplot(model_data_winsorized, aes(x = time, y = AvgTempNO1)) +
+  geom_line(size = 0.45)
+ggplot(model_data_winsorized, aes(x = time, y = Energy)) +
+  geom_line()
+ggplot(model_data_winsorized, aes(x = time, y = demand)) +
+  geom_line(size = 0.1) #graphs tell us that there is a trend with increasing temp an decreacing demand for energy.
+
+
+cor(model_data_winsorized$Price_NOK, model_data_winsorized$AvgTempNO1, use = "complete.obs") #(-0.28) higher temp means lower price.
+cor(model_data_winsorized$demand, model_data_winsorized$AvgTempNO1, use = "complete.obs") # (-0.856) lower temps means higher price
+
+
+#because the higher the tempreature is, the lower demand is, we can find a point in temp that makes for a better variable to work with. saying that a temp of 18 degrees and above makes for a demand of 0 on heating. making temp a more linear variable the lower temp drops. easier to model with.
+#also creating lags for the variables we have
+
+clean_data <- model_data_winsorized %>%
+  arrange(time) %>%
+  mutate(HDH = pmax(0, 18 - AvgTempNO1)) %>%
+  mutate(
+    price_lag1 = lag(Price_NOK, 1),
+    price_lag24 = lag(Price_NOK, 24),
+    price_lag168 = lag(Price_NOK, 168),
+    
+    HDH_lag0 = HDH,
+    HDH_lag24 = lag(HDH, 24),
+    
+    demand_lag0 = demand,
+    demand_lag24 = lag(demand, 24),
+    
+    supply_lag0 = Energy,
+    supply_lag168 = lag(Energy, 168))
+
+#testing for correlations again: 
+cor(clean_data$Price_NOK, clean_data$HDH, use = "complete.obs") #higher HDH means a higher price
+cor(clean_data$demand, clean_data$HDH, use = "complete.obs") #higher HDH increases demand for energy
+
+clean_data <- clean_data %>%
+  mutate(
+    hour = as.integer(format(time, "%H")),
+    weekday = as.integer(format(time, "%u")),
+    dummy_hour = factor(hour),
+    dummy_weekday = factor(weekday))
+
+
+final_data <- clean_data %>%
+  mutate(y_next = lead(Price_NOK, 24)) %>%
+  drop_na()
+
+MODEL <- lm(
+  y_next ~ price_lag24 + price_lag1 + price_lag168 + HDH_lag0 + HDH_lag24 +      demand_lag0 + demand_lag24 + supply_lag0 + supply_lag168 + dummy_hour +        dummy_weekday, data = final_data)
+
+summary(MODEL)
+
+prediction <- predict(MODEL)
+RMSE <- sqrt(mean((final_data$y_next - prediction)^2))
+RMSE_naive_1 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag1)^2))
+RMSE_naive_24 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag24)^2))
+c(MODEL = RMSE, NAIVE1 = RMSE_naive_1, NAIVE24 = RMSE_naive_24)
 
 ```
