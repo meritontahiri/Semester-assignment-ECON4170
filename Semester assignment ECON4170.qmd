@@ -190,11 +190,31 @@ clean_data <- model_data_winsorized %>%
     supply_lag0 = Energy,
     supply_lag168 = lag(Energy, 168))
 
+#testing for correlations again: 
 cor(clean_data$Price_NOK, clean_data$HDH, use = "complete.obs") #higher HDH means a higher price
 cor(clean_data$demand, clean_data$HDH, use = "complete.obs") #higher HDH increases demand for energy
 
+clean_data <- clean_data %>%
+  mutate(
+    hour = as.integer(format(time, "%H")),
+    weekday = as.integer(format(time, "%u")),
+    dummy_hour = factor(hour),
+    dummy_weekday = factor(weekday))
 
 
+final_data <- clean_data %>%
+  mutate(y_next = lead(Price_NOK, 24)) %>%
+  drop_na()
+
+MODEL <- lm(
+  y_next ~ price_lag24 + price_lag1 + price_lag168 + HDH_lag0 + HDH_lag24 +      demand_lag0 + demand_lag24 + supply_lag0 + supply_lag168 + dummy_hour +        dummy_weekday, data = final_data)
+
+summary(MODEL)
+
+prediction <- predict(MODEL)
+RMSE <- sqrt(mean((final_data$y_next - prediction)^2))
+RMSE_naive_1 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag1)^2))
+RMSE_naive_24 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag24)^2))
+c(MODEL = RMSE, NAIVE1 = RMSE_naive_1, NAIVE24 = RMSE_naive_24)
 
 ```
-
