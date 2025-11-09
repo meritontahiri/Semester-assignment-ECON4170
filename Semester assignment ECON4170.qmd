@@ -142,7 +142,7 @@ model_data <- temperature %>%
 model_data<- model_data%>%
   mutate(time = with_tz(time, "CET"))
 
-#set end timestamp of data to 25.10.25 23:00 because of timechange on the 26th makes data not aligned so it saves trouble ending a few days earlier#
+#set end timestamp of data to 25.10.25 23:00 because of timechange on the 26th makes data not aligned so it saves trouble ending a few days earlier
 
 library(dplyr)
 
@@ -164,11 +164,11 @@ ggplot(model_data_winsorized, aes(x = time, y = AvgTempNO1)) +
 ggplot(model_data_winsorized, aes(x = time, y = Energy)) +
   geom_line()
 ggplot(model_data_winsorized, aes(x = time, y = demand)) +
-  geom_line(size = 0.1) #graphs tell us that there is a trend with increasing temp an decreacing demand for energy.
+  geom_line(size = 0.1) #graphs tell us that there is a trend with increasing temp an decreasing demand for energy.
 
 
-cor(model_data_winsorized$Price_NOK, model_data_winsorized$AvgTempNO1, use = "complete.obs") #(-0.28) higher temp means lower price.
-cor(model_data_winsorized$demand, model_data_winsorized$AvgTempNO1, use = "complete.obs") # (-0.856) lower temps means higher price
+cor(model_data_winsorized$Price_NOK, model_data_winsorized$AvgTempNO1) #(-0.28) higher temp means lower price.
+cor(model_data_winsorized$demand, model_data_winsorized$AvgTempNO1) # (-0.856) lower temps means higher demand for energy (heating)
 
 
 #because the higher the tempreature is, the lower demand is, we can find a point in temp that makes for a better variable to work with. saying that a temp of 18 degrees and above makes for a demand of 0 on heating. making temp a more linear variable the lower temp drops. easier to model with.
@@ -176,7 +176,7 @@ cor(model_data_winsorized$demand, model_data_winsorized$AvgTempNO1, use = "compl
 
 clean_data <- model_data_winsorized %>%
   arrange(time) %>%
-  mutate(HDH = pmax(0, 18 - AvgTempNO1)) %>%
+  mutate(HDH = pmax(0, 18 - AvgTempNO1)) %>% 
   mutate(
     price_lag1 = lag(Price_NOK, 1),
     price_lag2 = lag(Price_NOK, 2),
@@ -186,25 +186,26 @@ clean_data <- model_data_winsorized %>%
     price_lag24 = lag(Price_NOK, 24),
     price_lag168 = lag(Price_NOK, 168),
     
-    HDH_lag0 = HDH,
     HDH_lag24 = lag(HDH, 24),
     
-    demand_lag0 = demand,
     demand_lag24 = lag(demand, 24),
     
-    supply_lag0 = Energy,
     supply_lag168 = lag(Energy, 168))
 
 #testing for correlations again: 
-cor(clean_data$Price_NOK, clean_data$HDH, use = "complete.obs") #higher HDH means a higher price
-cor(clean_data$demand, clean_data$HDH, use = "complete.obs") #higher HDH increases demand for energy
+cor(clean_data$Price_NOK, clean_data$HDH) #higher HDH means a higher price
+cor(clean_data$demand, clean_data$HDH) #higher HDH increases demand for energy
 
-clean_data <- clean_data %>%
+clean_data_dummies <- clean_data %>%
   mutate(
     hour = as.integer(format(time, "%H")),
     weekday = as.integer(format(time, "%u")),
+    week_nr = as.integer(format(time, "%W")),
+    month = as.integer(format(time, "%m")),
     dummy_hour = factor(hour),
-    dummy_weekday = factor(weekday))
+    dummy_weekday = factor(weekday),
+    dummy_week_nr = factor(week_nr),
+    dummy_month = factor(month))
 
 #Benchmark model##
 
