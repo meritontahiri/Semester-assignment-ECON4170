@@ -27,6 +27,7 @@ we will transform this data to fit our needs as we go. to start, we will be addi
 library(tidyverse) #standard package for most projects in this course
 library(janitor) #used by professor in seminar 5 solution
 library(lubridate) #found in syllabus
+library(forecast) #from datacamp course Forecasting in R
 
 
 ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
@@ -178,6 +179,10 @@ clean_data <- model_data_winsorized %>%
   mutate(HDH = pmax(0, 18 - AvgTempNO1)) %>%
   mutate(
     price_lag1 = lag(Price_NOK, 1),
+    price_lag2 = lag(Price_NOK, 2),
+    price_lag3 = lag(Price_NOK, 3),
+    price_lag4 = lag(Price_NOK, 4),
+    price_lag5 = lag(Price_NOK, 5),
     price_lag24 = lag(Price_NOK, 24),
     price_lag168 = lag(Price_NOK, 168),
     
@@ -201,20 +206,92 @@ clean_data <- clean_data %>%
     dummy_hour = factor(hour),
     dummy_weekday = factor(weekday))
 
+#Benchmark model##
+
+benchmarkmodel <- clean_data%>%
+  select(Price_NOK, price_lag1, price_lag24, price_lag168)%>%
+  mutate(error_naive_1 = Price_NOK - price_lag1,
+         error_naive_24 = Price_NOK - price_lag24,
+         error_naive_168 = Price_NOK - price_lag168)
+
+#split the data to only 80% to compare with later model##
+
+split <- round(nrow(benchmarkmodel) * 0.80)
+
+#creating the test set##
+test <- benchmarkmodel[(split + 1):nrow(benchmarkmodel), ]
+
+#metrics for the benchmark model##
+
+metrics_lag_1 <- accuracy(test$price_lag1, test$Price_NOK)
+metrics_lag_24 <- accuracy(test$price_lag24, test$Price_NOK)
+metrics_lag_168 <- accuracy(test$price_lag168, test$Price_NOK)
+
+#creating the adl model
 
 final_data <- clean_data %>%
   mutate(y_next = lead(Price_NOK, 24)) %>%
   drop_na()
 
-MODEL <- lm(
-  y_next ~ price_lag24 + price_lag1 + price_lag168 + HDH_lag0 + HDH_lag24 +      demand_lag0 + demand_lag24 + supply_lag0 + supply_lag168 + dummy_hour +        dummy_weekday, data = final_data)
+#saving the formula for later use#
+struktur <- y_next ~ price_lag24 + price_lag1 + price_lag2 + price_lag3 + price_lag4 + price_lag5 + price_lag168 + HDH_lag24 + demand_lag24 + supply_lag168 + dummy_hour + dummy_weekday
 
-summary(MODEL)
+model <- lm(struktur, data = final_data)
 
+summary(model)
+
+#acf plot to test for white noise#
+acf(residuals(model), lag.max = 168)
+
+###trying with sarimax because strong autocorrelation in adl model###
+
+final_data <- clean_data %>%
+  mutate(y_next = lead(Price_NOK, 24)) %>%
+  drop_na()
+
+#using struktur from earlier but dopping price as arima handles price dynamics#
+
+struktur_xreg <- y_next ~ HDH_lag24 + demand_lag24 + supply_lag168 + dummy_hour + dummy_weekday - 1
+
+#build y and x for the sarimax model#
+
+y<- ts(final_data$y_next, frequency = 24)
+
+#we also use this from the previous code but with some modfications#
+x <- model.matrix(struktur_xreg, data = final_data)
+
+# arima model has its own constant and the dummy_hour creates it's own constant aswell so there are two constants meaning duplicate info. By removing hour 0 the model looks at the other by how much higher or lower they are compared to hour 0 #
+
+x <- x[, colnames(x) != "dummy_hour0", drop = FALSE]
+
+##building the sarimax and setting max p and q for faster runs#
+
+sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
+
+#summary from previous just switching out model#
+
+summary(sarimax)
+
+#acf with new model#
+
+acf(residuals(sarimax), lag.max = 168)
+    
 prediction <- predict(MODEL)
 RMSE <- sqrt(mean((final_data$y_next - prediction)^2))
 RMSE_naive_1 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag1)^2))
 RMSE_naive_24 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag24)^2))
 c(MODEL = RMSE, NAIVE1 = RMSE_naive_1, NAIVE24 = RMSE_naive_24)
+
+
+
+
+
+
+
+
+
+
+
+
 
 ```
