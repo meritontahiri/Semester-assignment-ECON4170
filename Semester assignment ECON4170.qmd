@@ -475,9 +475,6 @@ test <- final_data[(train_set + 1):nrow(final_data), ]
 
 
 
-
-
-
 ```{r}
 #CHecks 
 
