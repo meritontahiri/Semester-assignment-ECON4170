@@ -402,6 +402,8 @@ summary(model)
 #acf plot to test for white noise#
 acf(residuals(model), lag.max = 168)
 ```
+
+
 ```{r}
 ###trying with sarimax because strong autocorrelation in adl model###
 
@@ -426,12 +428,11 @@ x <- x[, -match(grep("^dummy_hour",   colnames(x), value = TRUE)[1], colnames(x)
 x <- x[, -match(grep("^dummy_weekday", colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
 x <- x[, -match(grep("^dummy_month",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
 
-
 ##building the sarimax and setting max p and q for faster runs#
 
-sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
+sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1, include.mean = FALSE) #to avoid duplicate constant
 
-#summary from previous just switching out model#
+#summary from previous script just switching out model#
 
 summary(sarimax)
 
@@ -474,11 +475,8 @@ test <- final_data[(train_set + 1):nrow(final_data), ]
 
 
 
+```
 
-
-
-
-```{r}
 #CHecks 
 
 
