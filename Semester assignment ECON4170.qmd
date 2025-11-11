@@ -182,13 +182,17 @@ clean_data <- model_data_winsorized %>%
   mutate(HDH = pmax(0, 18 - AvgTempNO1)) %>% 
   mutate(
     price_lag1 = lag(Price_NOK, 1),
+    price_lag2 = lag(Price_NOK, 2),
     price_lag24 = lag(Price_NOK, 24),
     price_lag168 = lag(Price_NOK, 168),
     
+    HDH = HDH,
     HDH_lag24 = lag(HDH, 24),
     
+    demand = demand,
     demand_lag24 = lag(demand, 24),
     
+    Energy = Energy,
     supply_lag168 = lag(Energy, 168))
 
 #testing for correlations again: 
@@ -203,11 +207,165 @@ clean_data_dummies <- clean_data %>%
     dummy_hour = factor(hour),
     dummy_weekday = factor(weekday),
     dummy_month = factor(month))
+```
 
+```{r}
+# LAG selection rolling cross-validation with help of AI
+#  Step 1 - Candidate lag sets ----
+price_lags_list     <- list(c(1), c(1, 24), c(1, 24, 168), c(1, 2, 24, 168))
+HDH_lags_list       <- list(c(0), c(0, 24))
+load_lags_list      <- list(c(0), c(0, 24))       # demand
+reservoir_lags_list <- list(c(0), c(0, 168))      # Energy (reservoir)
+
+# Optional: basic check
+stopifnot(all(c("time", "Price_NOK", "demand", "Energy") %in% names(clean_data)))
+
+#  Step 2 - Rolling expanding-window CV ----
+library(dplyr)
+
+rolling_cv_rmse <- function(df, price_lags, hdh_lags, load_lags, reservoir_lags,
+                            min_train = 24 * 14) {
+  # Purpose:
+  #  - Expanding window CV
+  #  - Forecast 1-step ahead each time using linear ADL (lm)
+  #  - Return mean RMSE across all steps
+
+  df_lag <- df %>%
+  mutate(
+    # Create lagged features dynamically (explicitly reference df$)
+    !!!setNames(lapply(price_lags, \(L) dplyr::lag(df$Price_NOK, L)),
+                paste0("price_lag", price_lags)),
+    !!!setNames(lapply(hdh_lags, \(L) dplyr::lag(df$HDH, L)),
+                paste0("HDH_lag", hdh_lags)),
+    !!!setNames(lapply(load_lags, \(L) dplyr::lag(df$demand, L)),
+                paste0("demand_lag", load_lags)),
+    !!!setNames(lapply(reservoir_lags, \(L) dplyr::lag(df$Energy, L)),
+                paste0("supply_lag", reservoir_lags))
+  ) %>%
+  drop_na()
+
+
+  # Safety: if not enough obs for training + test, return Inf
+  if (nrow(df_lag) < (min_train + 1)) return(Inf)
+
+  # Build formula automatically
+  preds <- c(
+    paste0("price_lag", price_lags),
+    paste0("HDH_lag", hdh_lags),
+    paste0("demand_lag", load_lags),
+    paste0("supply_lag", reservoir_lags)
+  )
+  fml <- as.formula(paste("Price_NOK ~", paste(preds, collapse = " + ")))
+
+  y <- df_lag$Price_NOK
+  n <- nrow(df_lag)
+  errors <- numeric(0)
+
+  # Expanding window loop
+ for (t in seq(min_train + 1, n, by = 4)) {   # evaluate every 4th hour (~6x faster)
+
+    train_idx <- 1:(t - 1)
+    test_idx  <- t
+
+    fit <- try(lm(fml, data = df_lag[train_idx, , drop = FALSE]), silent = TRUE)
+    if (inherits(fit, "try-error")) return(Inf)
+
+    pred <- predict(fit, newdata = df_lag[test_idx, , drop = FALSE])
+    errors <- c(errors, y[test_idx] - pred)
+  }
+
+  sqrt(mean(errors^2))
+}
+#  Step 3 - Evaluate all lag combinations ----
+library(purrr)
+library(tibble)
+
+# Build all combinations of lag-set indices
+grid <- expand.grid(
+  price = seq_along(price_lags_list),
+  HDH = seq_along(HDH_lags_list),
+  load = seq_along(load_lags_list),
+  reservoir = seq_along(reservoir_lags_list),
+  KEEP.OUT.ATTRS = FALSE
+)
+
+# Run rolling CV for each combination
+results <- pmap_dfr(
+  as.list(data.frame(grid)),
+  function(price, HDH, load, reservoir) {
+    pl <- price_lags_list[[price]]
+    hl <- HDH_lags_list[[HDH]]
+    ll <- load_lags_list[[load]]
+    rl <- reservoir_lags_list[[reservoir]]
+
+    rmse <- rolling_cv_rmse(
+      df = clean_data,
+      price_lags = pl,
+      hdh_lags = hl,
+      load_lags = ll,
+      reservoir_lags = rl,
+      min_train = 24 * 14
+    )
+
+    tibble(
+      price, HDH, load, reservoir,
+      RMSE = rmse,
+      complexity = length(pl) + length(hl) + length(ll) + length(rl)
+    )
+  }
+) %>%
+  arrange(RMSE, complexity)
+
+# Preview results
+print(results)
+
+#  Step 4 - Parsimony rule ----
+
+# Find the best RMSE overall
+best_rmse <- min(results$RMSE, na.rm = TRUE)
+
+# Keep all models within 1% of best
+final_pick <- results %>%
+  filter(RMSE <= best_rmse * 1.01) %>%          # within 1%
+  arrange(complexity, RMSE) %>%                 # simplest first
+  slice(1)                                      # pick top
+
+# Extract the actual lag configuration
+chosen_price_lags     <- price_lags_list[[final_pick$price]]
+chosen_HDH_lags       <- HDH_lags_list[[final_pick$HDH]]
+chosen_load_lags      <- load_lags_list[[final_pick$load]]
+chosen_reservoir_lags <- reservoir_lags_list[[final_pick$reservoir]]
+
+# Display selection
+print(final_pick)
+print(list(
+  price_lags     = chosen_price_lags,
+  HDH_lags       = chosen_HDH_lags,
+  load_lags      = chosen_load_lags,
+  reservoir_lags = chosen_reservoir_lags
+))
+#Step 5 - Save chosen lag configuration ----
+final_lags <- list(
+  price_lags     = chosen_price_lags,
+  HDH_lags       = chosen_HDH_lags,
+  load_lags      = chosen_load_lags,
+  reservoir_lags = chosen_reservoir_lags
+)
+
+save(final_lags, file = "chosen_lags.RData")
+
+# 
+```
+
+
+
+
+```{r}
 #Benchmark model##
 
 benchmarkmodel <- clean_data%>%
   select(Price_NOK, price_lag1, price_lag24, price_lag168)%>%
+  drop_na() %>% 
   mutate(error_naive_1 = Price_NOK - price_lag1,
          error_naive_24 = Price_NOK - price_lag24,
          error_naive_168 = Price_NOK - price_lag168)
@@ -235,7 +393,7 @@ final_data <- clean_data_dummies %>%
   drop_na()
 
 #saving the formula for later use#
-struktur <- y_next ~ price_lag24 + price_lag168 + HDH_lag24 + demand_lag24 + supply_lag168 + dummy_hour + dummy_weekday + dummy_month
+struktur <- y_next ~ price_lag1 + price_lag2 + price_lag24 + price_lag168 + HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month
 
 model <- lm(struktur, data = final_data)
 
@@ -244,8 +402,6 @@ summary(model)
 #acf plot to test for white noise#
 acf(residuals(model), lag.max = 168)
 ```
-
-
 ```{r}
 ###trying with sarimax because strong autocorrelation in adl model###
 
@@ -255,7 +411,7 @@ final_data <- clean_data_dummies %>%
 
 #using struktur from earlier but dopping price as arima handles price dynamics#
 
-struktur_xreg <- y_next ~ HDH_lag24 + demand_lag24 + supply_lag168 + dummy_hour + dummy_weekday + dummy_month - 1
+struktur_xreg <- y_next ~ HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month - 1
 
 #build y and x for the sarimax model#
 
@@ -264,43 +420,95 @@ y<- ts(final_data$y_next, frequency = 24)
 #we also use this from the previous code but with some modfications#
 x <- model.matrix(struktur_xreg, data = final_data)
 
+# arima model has its own constant and the dummy_hour creates it's own constant aswell so there are two constants meaning duplicate info. By removing hour 0 the model looks at the other by how much higher or lower they are compared to hour 0 #
+
+x <- x[, -match(grep("^dummy_hour",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
+x <- x[, -match(grep("^dummy_weekday", colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
+x <- x[, -match(grep("^dummy_month",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
+
+
 ##building the sarimax and setting max p and q for faster runs#
 
-sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1, include.mean = FALSE) #to avoid duplicate constant
+sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
 
-#summary from previous script just switching out model#
+#summary from previous just switching out model#
 
 summary(sarimax)
 
 #acf with new model#
 
 acf(residuals(sarimax), lag.max = 168)
+
+checkresiduals(sarimax)
+
 ```
 
 ```{r}
+## From previous code assigned to new model##
+x_new <- model.matrix(struktur_xreg, data = final_data)
 
-# arima model has its own constant and the dummy_hour creates it's own constant aswell so there are two constants meaning duplicate info. By removing hour 0 the model looks at the other by how much higher or lower they are compared to hour 0 #
-
-x <- x[, colnames(x) != "dummy_hour0", drop = FALSE]
-
-
-
-prediction <- predict(MODEL)
-RMSE <- sqrt(mean((final_data$y_next - prediction)^2))
-RMSE_naive_1 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag1)^2))
-RMSE_naive_24 <- sqrt(mean((final_data$Price_NOK - final_data$price_lag24)^2))
-c(MODEL = RMSE, NAIVE1 = RMSE_naive_1, NAIVE24 = RMSE_naive_24)
+### dropping values as done earlier ###
+x_new <- x_new [, -match(grep("^dummy_hour",   colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
+x_new <- x_new[, -match(grep("^dummy_weekday", colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
+x_new <- x_new[, -match(grep("^dummy_month",   colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
 
 
+keep_cols <- colnames(x_new)
+length(keep_cols)
+head(keep_cols)
 
+##creating train and test splits#
 
+# Determine row to split
+train_set <- floor(nrow(final_data) * 0.80)
 
+# Create train
+train <- final_data[1:train_set, ]
 
-
-
-
-
-
+# Create test
+test <- final_data[(train_set + 1):nrow(final_data), ]
 
 
 ```
+
+
+
+
+
+
+
+
+```{r}
+#CHecks 
+
+
+#simple model
+
+###trying with sarimax because strong autocorrelation in adl model###
+
+final_data <- clean_data_dummies %>%
+  mutate(y_next = lead(Price_NOK, 24)) %>%
+  drop_na()
+
+#build y and x for the sarimax model#
+
+y<- ts(final_data$y_next, frequency = 24)
+
+struktur_xreg <- y_next ~ HDH + demand + dummy_hour - 1
+x <- model.matrix(struktur_xreg, data = final_data)
+x <- x[, colnames(x) != "dummy_hour0", drop = FALSE]
+sarimax_simpler <- auto.arima(y, xreg = x, seasonal = TRUE, stepwise = TRUE, approximation = TRUE,
+                              max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
+summary(sarimax_simpler)
+
+#acf with new model#
+
+acf(residuals(sarimax), lag.max = 168)
+
+checkresiduals(sarimax)
+
+```
+
+
+
+
