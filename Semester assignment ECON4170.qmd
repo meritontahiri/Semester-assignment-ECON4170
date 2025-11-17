@@ -28,7 +28,13 @@ library(tidyverse) #standard package for most projects in this course
 library(janitor) #used by professor in seminar 5 solution
 library(lubridate) #found in syllabus
 library(forecast) #from datacamp course Forecasting in R
+install.packages("gridExtra")# To make tables in in png
 
+#Creating folders to save output in later
+dir.create("output", showWarnings = FALSE)
+dir.create("output/data", showWarnings = FALSE)
+dir.create("output/figures", showWarnings = FALSE)
+dir.create("output/tables", showWarnings = FALSE)
 
 ELP <- readr::read_csv("GUI_ENERGY_PRICES_202412312300-202512312300.csv") %>%
   clean_names() %>%
@@ -69,10 +75,10 @@ reservior_hourly <- ELP %>%
   fill(Energy, .direction = "down") %>%
   fill(Energy, .direction = "up")
 
-
-ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) + #ggplot to check up on the data
+ELP_plot <- ggplot(ELP, aes(x =hourly_time, y = Price_NOK)) + #ggplot to check up on the data
   geom_line() +
   labs(title = "Electricity prices (hourly)")
+ggsave(filename = "output/figures/ELP.png", plot = ELP_plot)
 
 ```
 
@@ -148,8 +154,9 @@ library(dplyr)
 
 model_data <- model_data %>% 
   filter(time <= "2025-10-25 23:00:00")
+#Saving data
+write.csv(model_data,"output/data/model_data.csv")
 ```
-
 
 ```{r}
 model_data_winsorized <- model_data %>%
@@ -159,15 +166,21 @@ model_data_winsorized <- model_data %>%
     high <- quantile(.x, 0.99, na.rm = TRUE)
     pmin(pmax(.x, low), high)}))
 
+#plotting data
 
-ggplot(model_data_winsorized, aes(x = time, y = Price_NOK)) +
+price_plot<-ggplot(model_data_winsorized, aes(x = time, y = Price_NOK)) +
   geom_line(size = 0.45)
-ggplot(model_data_winsorized, aes(x = time, y = AvgTempNO1)) +
+avgtemp_plot<-ggplot(model_data_winsorized, aes(x = time, y = AvgTempNO1)) +
   geom_line(size = 0.45)
-ggplot(model_data_winsorized, aes(x = time, y = Energy)) +
+Energy_plot<-ggplot(model_data_winsorized, aes(x = time, y = Energy)) +
   geom_line()
-ggplot(model_data_winsorized, aes(x = time, y = demand)) +
+demand_plot<-ggplot(model_data_winsorized, aes(x = time, y = demand)) +
   geom_line(size = 0.1) #graphs tell us that there is a trend with increasing temp an decreasing demand for energy.
+ #saving plots 
+ggsave(filename = "output/figures/price.png", plot = price_plot)
+ggsave(filename = "output/figures/avgtemp.png", plot = avgtemp_plot)
+ggsave(filename = "output/figures/Energy.png", plot = Energy_plot)
+ggsave(filename = "output/figures/demand.png", plot = demand_plot)
 
 
 cor(model_data_winsorized$Price_NOK, model_data_winsorized$AvgTempNO1) #(-0.28) higher temp means lower price.
@@ -207,10 +220,25 @@ clean_data_dummies <- clean_data %>%
     dummy_hour = factor(hour),
     dummy_weekday = factor(weekday),
     dummy_month = factor(month))
+#this drops all unused values##
+clean_data_dummies <- clean_data_dummies %>%
+  mutate(
+    dummy_hour = droplevels(dummy_hour),
+    dummy_weekday = droplevels(dummy_weekday),
+    dummy_month = droplevels(dummy_month)
+  )
+
+#saving the clean_data_dummies
+write.csv(clean_data_dummies,"output/data/clean_data_dummies.csv")
 ```
 
 ```{r}
-# LAG selection rolling cross-validation with help of AI
+############################AI chunk#########################
+###################################################################
+##################################################################
+#LAG selection rolling cross-validation with help of AI
+#####################################################################
+#################################################################
 #  Step 1 - Candidate lag sets ----
 price_lags_list     <- list(c(1), c(1, 24), c(1, 24, 168), c(1, 2, 24, 168))
 HDH_lags_list       <- list(c(0), c(0, 24))
@@ -351,39 +379,15 @@ final_lags <- list(
   load_lags      = chosen_load_lags,
   reservoir_lags = chosen_reservoir_lags
 )
+# load the existing file
+load("chosen_lags.RData")   # this brings final_lags into the environment
 
-save(final_lags, file = "chosen_lags.RData")
+save(final_lags, file = "output/data/chosen_lags.RData")
 
-# 
+##################################################################################################################################################
+#End of AI generated Code
+####################################################################################################################
 ```
-
-
-
-
-```{r}
-#Benchmark model##
-
-benchmarkmodel <- clean_data%>%
-  select(Price_NOK, price_lag1, price_lag24, price_lag168)%>%
-  drop_na() %>% 
-  mutate(error_naive_1 = Price_NOK - price_lag1,
-         error_naive_24 = Price_NOK - price_lag24,
-         error_naive_168 = Price_NOK - price_lag168)
-
-#split the data to only 80% to compare with later model##
-
-split <- round(nrow(benchmarkmodel) * 0.80)
-
-#creating the test set##
-test <- benchmarkmodel[(split + 1):nrow(benchmarkmodel), ]
-
-#metrics for the benchmark model##
-
-metrics_lag_1 <- accuracy(test$price_lag1, test$Price_NOK)
-metrics_lag_24 <- accuracy(test$price_lag24, test$Price_NOK)
-metrics_lag_168 <- accuracy(test$price_lag168, test$Price_NOK)
-```
-
 
 ```{r}
 #creating the adl model
@@ -395,14 +399,33 @@ final_data <- clean_data_dummies %>%
 #saving the formula for later use#
 struktur <- y_next ~ price_lag1 + price_lag2 + price_lag24 + price_lag168 + HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month
 
-model <- lm(struktur, data = final_data)
+adl_model <- lm(struktur, data = final_data)
 
-summary(model)
+summary(adl_model)
 
 #acf plot to test for white noise#
-acf(residuals(model), lag.max = 168)
-```
+acf(residuals(adl_model), lag.max = 168)
 
+#saving the acf plot
+# Source - https://stackoverflow.com/a
+# Posted by Andrie, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 3.0
+
+png(filename="output/figures/acf_adl_model.png")
+plot(acf(residuals(adl_model), lag.max = 168))
+dev.off()
+
+
+#saving the summary
+# Source - https://stackoverflow.com/a
+# Posted by Phil, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 4.0
+
+sink("output/tables/adl_model.txt")
+print(summary(adl_model))
+sink()  # returns output to the console
+
+```
 
 ```{r}
 ###trying with sarimax because strong autocorrelation in adl model###
@@ -413,7 +436,7 @@ final_data <- clean_data_dummies %>%
 
 #using struktur from earlier but dopping price as arima handles price dynamics#
 
-struktur_xreg <- y_next ~ HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month - 1
+struktur_xreg <- y_next ~ price_lag24 + HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month
 
 #build y and x for the sarimax model#
 
@@ -422,15 +445,13 @@ y<- ts(final_data$y_next, frequency = 24)
 #we also use this from the previous code but with some modfications#
 x <- model.matrix(struktur_xreg, data = final_data)
 
-# arima model has its own constant and the dummy_hour creates it's own constant aswell so there are two constants meaning duplicate info. By removing hour 0 the model looks at the other by how much higher or lower they are compared to hour 0 #
-
-x <- x[, -match(grep("^dummy_hour",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
-x <- x[, -match(grep("^dummy_weekday", colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
-x <- x[, -match(grep("^dummy_month",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
-
-##building the sarimax and setting max p and q for faster runs#
-
-sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1, include.mean = FALSE) #to avoid duplicate constant
+sarimax <- forecast::Arima(
+  y, 
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x, include.mean = FALSE
+)
+forecast::checkresiduals(sarimax)
 
 #summary from previous script just switching out model#
 
@@ -440,23 +461,30 @@ summary(sarimax)
 
 acf(residuals(sarimax), lag.max = 168)
 
-checkresiduals(sarimax)
+#saving the acf plot
+# Source - https://stackoverflow.com/a
+# Posted by Andrie, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 3.0
+
+png(filename="output/figures/sarimax.png")
+plot(acf(residuals(sarimax), lag.max = 168))
+dev.off()
+
+
+#saving the summary
+# Source - https://stackoverflow.com/a
+# Posted by Phil, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 4.0
+
+sink("output/tables/sarimax.txt")
+print(summary(sarimax))
+sink()  # returns output to the console
 
 ```
 
+\
+
 ```{r}
-## From previous code assigned to new model##
-x_new <- model.matrix(struktur_xreg, data = final_data)
-
-### dropping values as done earlier ###
-x_new <- x_new [, -match(grep("^dummy_hour",   colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
-x_new <- x_new[, -match(grep("^dummy_weekday", colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
-x_new <- x_new[, -match(grep("^dummy_month",   colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
-
-
-keep_cols <- colnames(x_new)
-length(keep_cols)
-head(keep_cols)
 
 ##creating train and test splits#
 
@@ -464,49 +492,391 @@ head(keep_cols)
 train_set <- floor(nrow(final_data) * 0.80)
 
 # Create train
-train <- final_data[1:train_set, ]
+#train <- final_data[1:train_set, ]
 
 # Create test
 test <- final_data[(train_set + 1):nrow(final_data), ]
 
+#a place to store the forecasts and accuracy metrics #AI##
+
+rolling_forecasts <- numeric(nrow(test))
+actuals <- test$y_next
+
+## creating the loop with help of AI and reusing previous data##
+for (i in seq_len(nrow(test))) {
+  ################AI#####################
+  if (i %% 10 == 0) cat("Iteration:", i, "of", nrow(test), "at", format(Sys.time(), "%H:%M:%S"), "\n")
+############END OF AI GENERATED CODE######################
+  train_slice <- final_data[1:(train_set + i - 1), ]
+  
+  #Y arima training
+  y_train <- ts(train_slice$y_next, frequency = 24)
+  
+  #x arima training 
+  x_train <- model.matrix(struktur_xreg, data = train_slice)
+
+#####################################AI##############################
+# Compute basic stats (variance, min, max) for every column in x_train.
+# This tells us if a dummy variable is "dead" (all values = 0).
+stats <- apply(x_train, 2, function(z) c(var = var(z), min = min(z), max = max(z)))
+
+# Identify columns that are ALWAYS zero.
+# A column is all-zero if:
+#   - variance = 0  (no variation)
+#   - min = 0       (lowest value is 0)
+#   - max = 0       (highest value is 0)
+drop_cols <- names(which(stats["var", ] == 0 &
+                         stats["min", ] == 0 &
+                         stats["max", ] == 0))
+
+# If such columns exist, remove them from x_train.
+# This prevents ARIMA from crashing due to rank-deficient regressors.
+if (length(drop_cols) > 0) {
+  x_train <- x_train[, !(colnames(x_train) %in% drop_cols), drop = FALSE]
+}
+  
+#################################END OF AI genereated code ######################
+
+## just copy and paste our previous model but change the y and x
+  
+  temp_model <-  forecast::Arima(
+  y_train,
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x_train , include.mean = FALSE,
+  method = "CSS" #faster runtime <0.5%rmse impact
+) 
+if (i == 1) cat("method used:", temp_model$method, "\n")
+
+  test_row <- test[i, , drop = FALSE]
+
+  # Only need to create the x_test model matrix for the test## copy and paste previous code with modifications(switching the name and Data to test_model)
+  
+  x_test <- model.matrix(struktur_xreg, data = test_row)
+  
+#################AI#####################
+miss <- setdiff(colnames(x_train), colnames(x_test))
+if (length(miss) > 0) for (m in miss) x_test <- cbind(x_test, setNames(list(0), m))
+x_test <- x_test[, colnames(x_train), drop = FALSE]
+##############END OF AI###########################
+# forecast using the model
+fc <- forecast::forecast(temp_model, xreg = x_test, h = 1)
+
+  # store
+  rolling_forecasts[i] <- as.numeric(fc$mean)
+}
+# creating error and calculating rmse and mae
+
+errors<- actuals - rolling_forecasts
+RMSE_sarimax <- sqrt(mean(errors^2))
+MAE_sarimax <- mean(abs(errors))
+
+##saving output#
+saveRDS(
+  list(
+    rolling_forecasts = rolling_forecasts,
+    actuals           = actuals,
+    errors            = errors,
+    RMSE_sarimax      = RMSE_sarimax,
+    MAE_sarimax       = MAE_sarimax
+  ),
+  file = "sarimax_test_results.rds"
+)
 
 ```
 
+```{r}
 
+sarimax_results <- readRDS("sarimax_test_results.rds")
 
+saveRDS(sarimax_results, file = "output/data/sarimax_results.rds")
+
+#Benchmark model##
+
+benchmarkmodel <- final_data%>%
+  select(time, Price_NOK, price_lag1, price_lag24, price_lag168)%>%
+  mutate(error_naive_1 = Price_NOK - price_lag1,
+         error_naive_24 = Price_NOK - price_lag24,
+         error_naive_168 = Price_NOK - price_lag168)
+
+#creating the test set from sarimax test_set to align 
+test_bench <- benchmarkmodel[(train_set + 1):nrow(benchmarkmodel), ]
+
+#metrics for the benchmark model##
+
+metrics_lag_1 <- accuracy(test_bench$Price_NOK, test_bench$price_lag1)
+metrics_lag_24 <- accuracy(test_bench$Price_NOK, test_bench$price_lag24)
+metrics_lag_168 <- accuracy(test_bench$Price_NOK, test_bench$price_lag168)
 
 ```
 
-#CHecks 
+```{r}
+#Creating the table for the metrics of all the models
+model <- c("sarimax", "naive1", "snaive24", "snaive168")
 
+RMSE <- c(as.numeric(sarimax_results$RMSE_sarimax), as.numeric(metrics_lag_1[,"RMSE"]), as.numeric(metrics_lag_24[,"RMSE"]), as.numeric(metrics_lag_168[,"RMSE"]))
+
+MAE <- c(as.numeric(sarimax_results$RMSE_sarimax), as.numeric(metrics_lag_1[,"MAE"]), as.numeric(metrics_lag_24[,"MAE"]), as.numeric(metrics_lag_168[,"MAE"]))
+
+Error_sarimax <- sarimax_results$errors
+
+write.csv(error_sarimax,"output/tables/error_sarimax.csv")
+
+metrics_table <- data.frame (model, RMSE, MAE )
+
+#saving the table as png for word
+# Source - https://stackoverflow.com/a
+# Posted by Ning
+# Retrieved 2025-11-17, License - CC BY-SA 3.0
+library(gridExtra)
+png("output/tables/metrics_table.png")
+grid.table(metrics_table)
+dev.off()
+
+#saving the table as txt for coding
+write.csv(metrics_table, "output/tables/metrics_table.csv")
+
+#Diebold-mariano test
+
+#Creating the errors for e1 and e2 in diebold test
+error_lag1 <- test_bench$error_naive_1
+
+error_lag24 <- test_bench$error_naive_24
+
+error_lag168 <- test_bench$error_naive_168
+
+error_sarimax <- sarimax_results$errors
+
+#diebold mariano test sarimax vs naive 1
+
+dm_test1_P2 <- dm.test(e1 = error_sarimax, e2 = error_lag1, alternative = "less", h = 1, power = 2)
+#P = 1
+dm_test1_P1 <- dm.test(e1 = error_sarimax, e2 = error_lag1, alternative = "less", h = 1, power = 1)
+
+#sarimax vs snaive 24
+dm_test24_P2 <- dm.test(e1 = error_sarimax, e2 = error_lag24, alternative = "less", h = 1, power = 2)
+#P = 1
+dm_test24_P1 <- dm.test(e1 = error_sarimax, e2 = error_lag24, alternative = "less", h = 1, power = 1)
+
+#sarimax vs snaive 168
+dm_test168_P2 <- dm.test(e1 = error_sarimax, e2 = error_lag168, alternative = "less", h = 1, power = 2)
+#P = 1
+dm_test168_P1 <- dm.test(e1 = error_sarimax, e2 = error_lag168, alternative = "less", h = 1, power = 1)
+
+Diebold_Mariano_Test <- data.frame(
+  naive_1_P2TEST = dm_test1_P2$p.value,
+  naive_1_P1TEST = dm_test1_P1$p.value,
+  snavive_24_P2TEST = dm_test24_P2$p.value,
+  snaive_24_P1TEST = dm_test24_P1$p.value,
+  snaive_168_P2TEST = dm_test168_P2$p.value,
+  snaive_168_P1TEST = dm_test168_P1$p.value
+)
+#saving the table as png for word
+# Source - https://stackoverflow.com/a
+# Posted by Ning
+# Retrieved 2025-11-17, License - CC BY-SA 3.0
+library(gridExtra)
+png("output/tables/Diebold_Mariano_Test.png", width = 1000)
+grid.table(Diebold_Mariano_Test)
+dev.off()
+
+#saving the table as txt for coding
+write.csv(Diebold_Mariano_Test, "output/tables/Diebold_Mariano_Test.csv")
+```
+
+```{r}
+
+forecastPlots <- data.frame(
+  time = test$time,
+  forecast = sarimax_results$rolling_forecasts,
+  actual =  test$Price_NOK,
+  error = sarimax_results$errors
+)
+
+series <- c(Actual = "blue", Forecast = "red")
+
+forecast_actual <-ggplot(forecastPlots, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+
+# since the full plot is cramped up i decided to split into 3 different plots so that it gives better information
+
+plot1 <- forecastPlots %>% 
+  filter(between(time, as.Date('2025-08-28'), as.Date('2025-09-15')))
+##from sep.28 to okt.24
+plot2 <- forecastPlots %>% 
+  filter(between(time, as.Date('2025-09-16'), as.Date('2025-10-04')))
+#plot 3
+plot3 <- forecastPlots %>% 
+  filter(between(time, as.Date('2025-10-5'), as.Date('2025-10-24')))
+
+#plot 1
+
+series <- c(Actual = "blue", Forecast = "red")
+
+plot_1 <- ggplot(plot1, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+
+##plot 2
+
+series <- c(Actual = "blue", Forecast = "red")
+
+plot_2 <- ggplot(plot2, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+##plot 3
+series <- c(Actual = "blue", Forecast = "red")
+
+plot_3 <- ggplot(plot3, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+
+#histogram plot of the errors using density
+error_density <-ggplot(forecastPlots, aes(x = error)) +
+  geom_histogram(aes(y = ..density..), binwidth = 20)+
+  labs(
+    title = "Forecast errors",
+    y = "Density",
+    x = "Errors"
+  )
+ggsave(filename = "output/figures/plot1.png", plot = plot_1)
+ggsave(filename = "output/figures/plot2.png", plot = plot_2)
+ggsave(filename = "output/figures/plot3.png", plot = plot_3)
+ggsave(filename = "output/figures/forecast_actual.png", plot = forecast_actual)
+ggsave(filename = "output/figures/error_density.png", plot = error_density)
+
+```
+
+```{r}
+#To check which variables increase forecasting accuracy we take simple model and add variables
 
 #simple model
-
-###trying with sarimax because strong autocorrelation in adl model###
 
 final_data <- clean_data_dummies %>%
   mutate(y_next = lead(Price_NOK, 24)) %>%
   drop_na()
 
-#build y and x for the sarimax model#
+#build y and x
 
 y<- ts(final_data$y_next, frequency = 24)
 
-struktur_xreg <- y_next ~ HDH + demand + dummy_hour - 1
+struktur_xreg <- y_next ~ HDH + demand + dummy_hour 
+
 x <- model.matrix(struktur_xreg, data = final_data)
-x <- x[, colnames(x) != "dummy_hour0", drop = FALSE]
-sarimax_simpler <- auto.arima(y, xreg = x, seasonal = TRUE, stepwise = TRUE, approximation = TRUE,
-                              max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
-summary(sarimax_simpler)
+
+sarimax_simple <- forecast::Arima(
+  y, 
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x, include.mean = FALSE
+)
+forecast::checkresiduals(sarimax_simple)
+
+summary(sarimax_simple)
 
 #acf with new model#
 
-acf(residuals(sarimax), lag.max = 168)
+acf(residuals(sarimax_simple), lag.max = 168)
 
-checkresiduals(sarimax)
+#saving the acf plot
+# Source - https://stackoverflow.com/a
+# Posted by Andrie, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 3.0
+
+png(filename="output/figures/sarimax_simple.png")
+plot(acf(residuals(sarimax_simple), lag.max = 168))
+dev.off()
+
+#saving the summary
+# Source - https://stackoverflow.com/a
+# Posted by Phil, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 4.0
+
+sink("output/tables/sarimax_simple.txt")
+print(summary(sarimax_simple))
+sink()  # returns output to the console
+
+
+###simple model + energy#######
+
+final_data <- clean_data_dummies %>%
+  mutate(y_next = lead(Price_NOK, 24)) %>%
+  drop_na()
+
+#build y and x 
+
+y<- ts(final_data$y_next, frequency = 24)
+
+struktur_xreg <- y_next ~ HDH + demand + dummy_hour + Energy
+
+x <- model.matrix(struktur_xreg, data = final_data)
+
+sarimax_simple_energy <- forecast::Arima(
+  y, 
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x, include.mean = FALSE
+)
+forecast::checkresiduals(sarimax_simple_energy)
+
+summary(sarimax_simple_energy)
+
+#acf with new model#
+
+acf(residuals(sarimax_simple_energy), lag.max = 168)
+
+#saving the acf plot
+# Source - https://stackoverflow.com/a
+# Posted by Andrie, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 3.0
+
+png(filename="output/figures/sarimax_simple_energy.png")
+plot(acf(residuals(sarimax_simple_energy), lag.max = 168))
+dev.off()
+
+
+#saving the summary
+# Source - https://stackoverflow.com/a
+# Posted by Phil, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-11-17, License - CC BY-SA 4.0
+
+sink("output/tables/sarimax_simple_energy.txt")
+print(summary(sarimax_simple_energy))
+sink()  # returns output to the console
+
+
 
 ```
-
-
-
-

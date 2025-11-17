@@ -1,0 +1,26 @@
+Series: y 
+Regression with ARIMA(1,0,1)(1,0,1)[24] errors 
+
+Coefficients:
+         ar1     ma1    sar1     sma1  (Intercept)     HDH  demand  dummy_hour1  dummy_hour2
+      0.8983  0.1323  0.9603  -0.8779     205.6859  5.1774  0.0913     -50.3878     -70.8868
+s.e.  0.0058  0.0132  0.0084   0.0140     148.8153  2.8557  0.0185      18.4698      27.2266
+      dummy_hour3  dummy_hour4  dummy_hour5  dummy_hour6  dummy_hour7  dummy_hour8  dummy_hour9
+         -98.5953    -114.5630    -121.4595    -110.8278     -82.8972      28.7595     143.1260
+s.e.      33.6204      38.7221      42.3859      45.0970      47.0127      48.2894      49.9311
+      dummy_hour10  dummy_hour11  dummy_hour12  dummy_hour13  dummy_hour14  dummy_hour15
+          120.9300       43.3426      -19.0490      -80.1555     -125.9085     -152.3847
+s.e.       51.2098       52.2450       52.8233       53.0609       52.9243       51.9896
+      dummy_hour16  dummy_hour17  dummy_hour18  dummy_hour19  dummy_hour20  dummy_hour21
+         -133.3284      -78.8202      -15.0888       51.6290       83.4107       83.6516
+s.e.       50.3454       48.2686       45.7084       42.4653       38.4868       33.6366
+      dummy_hour22  dummy_hour23  Energy
+           84.9134       48.3431       0
+s.e.       27.1489       18.4335       0
+
+sigma^2 = 13240:  log likelihood = -42869.06
+AIC=85802.12   AICc=85802.42   BIC=86021.23
+
+Training set error measures:
+                     ME     RMSE      MAE       MPE     MAPE      MASE         ACF1
+Training set 0.01283152 114.8077 70.57818 -29.26791 46.68022 0.3554091 -0.002439259
