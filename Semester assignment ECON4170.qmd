@@ -453,7 +453,7 @@ sarimax <- forecast::Arima(
 )
 forecast::checkresiduals(sarimax)
 
-#summary from previous just switching out model#
+#summary from previous script just switching out model#
 
 summary(sarimax)
 
