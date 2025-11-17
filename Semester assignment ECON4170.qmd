@@ -150,7 +150,6 @@ model_data <- model_data %>%
   filter(time <= "2025-10-25 23:00:00")
 ```
 
-
 ```{r}
 model_data_winsorized <- model_data %>%
   mutate(
@@ -207,6 +206,14 @@ clean_data_dummies <- clean_data %>%
     dummy_hour = factor(hour),
     dummy_weekday = factor(weekday),
     dummy_month = factor(month))
+#this drops all unused values##
+clean_data_dummies <- clean_data_dummies %>%
+  mutate(
+    dummy_hour = droplevels(dummy_hour),
+    dummy_weekday = droplevels(dummy_weekday),
+    dummy_month = droplevels(dummy_month)
+  )
+
 ```
 
 ```{r}
@@ -357,34 +364,6 @@ save(final_lags, file = "chosen_lags.RData")
 # 
 ```
 
-
-
-
-```{r}
-#Benchmark model##
-
-benchmarkmodel <- clean_data%>%
-  select(Price_NOK, price_lag1, price_lag24, price_lag168)%>%
-  drop_na() %>% 
-  mutate(error_naive_1 = Price_NOK - price_lag1,
-         error_naive_24 = Price_NOK - price_lag24,
-         error_naive_168 = Price_NOK - price_lag168)
-
-#split the data to only 80% to compare with later model##
-
-split <- round(nrow(benchmarkmodel) * 0.80)
-
-#creating the test set##
-test <- benchmarkmodel[(split + 1):nrow(benchmarkmodel), ]
-
-#metrics for the benchmark model##
-
-metrics_lag_1 <- accuracy(test$price_lag1, test$Price_NOK)
-metrics_lag_24 <- accuracy(test$price_lag24, test$Price_NOK)
-metrics_lag_168 <- accuracy(test$price_lag168, test$Price_NOK)
-```
-
-
 ```{r}
 #creating the adl model
 
@@ -402,6 +381,7 @@ summary(model)
 #acf plot to test for white noise#
 acf(residuals(model), lag.max = 168)
 ```
+
 ```{r}
 ###trying with sarimax because strong autocorrelation in adl model###
 
@@ -411,7 +391,7 @@ final_data <- clean_data_dummies %>%
 
 #using struktur from earlier but dopping price as arima handles price dynamics#
 
-struktur_xreg <- y_next ~ HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month - 1
+struktur_xreg <- y_next ~ price_lag24 + HDH + demand + Energy + dummy_hour + dummy_weekday + dummy_month
 
 #build y and x for the sarimax model#
 
@@ -420,16 +400,13 @@ y<- ts(final_data$y_next, frequency = 24)
 #we also use this from the previous code but with some modfications#
 x <- model.matrix(struktur_xreg, data = final_data)
 
-# arima model has its own constant and the dummy_hour creates it's own constant aswell so there are two constants meaning duplicate info. By removing hour 0 the model looks at the other by how much higher or lower they are compared to hour 0 #
-
-x <- x[, -match(grep("^dummy_hour",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
-x <- x[, -match(grep("^dummy_weekday", colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
-x <- x[, -match(grep("^dummy_month",   colnames(x), value = TRUE)[1], colnames(x)), drop = FALSE]
-
-
-##building the sarimax and setting max p and q for faster runs#
-
-sarimax <- auto.arima(y, xreg = x, seasonal = TRUE , stepwise = TRUE, approximation = TRUE, max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
+sarimax <- forecast::Arima(
+  y, 
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x, include.mean = FALSE
+)
+forecast::checkresiduals(sarimax)
 
 #summary from previous just switching out model#
 
@@ -439,23 +416,9 @@ summary(sarimax)
 
 acf(residuals(sarimax), lag.max = 168)
 
-checkresiduals(sarimax)
-
 ```
 
 ```{r}
-## From previous code assigned to new model##
-x_new <- model.matrix(struktur_xreg, data = final_data)
-
-### dropping values as done earlier ###
-x_new <- x_new [, -match(grep("^dummy_hour",   colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
-x_new <- x_new[, -match(grep("^dummy_weekday", colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
-x_new <- x_new[, -match(grep("^dummy_month",   colnames(x_new), value = TRUE)[1], colnames(x_new)), drop = FALSE]
-
-
-keep_cols <- colnames(x_new)
-length(keep_cols)
-head(keep_cols)
 
 ##creating train and test splits#
 
@@ -463,49 +426,324 @@ head(keep_cols)
 train_set <- floor(nrow(final_data) * 0.80)
 
 # Create train
-train <- final_data[1:train_set, ]
+#train <- final_data[1:train_set, ]
 
 # Create test
 test <- final_data[(train_set + 1):nrow(final_data), ]
 
+#a place to store the forecasts and accuracy metrics #AI##
+
+rolling_forecasts <- numeric(nrow(test))
+actuals <- test$y_next
+
+## creating the loop with help of AI and reusing previous data##
+for (i in seq_len(nrow(test))) {
+  ##########
+  if (i %% 10 == 0) cat("Iteration:", i, "of", nrow(test), "at", format(Sys.time(), "%H:%M:%S"), "\n")
+############
+  train_slice <- final_data[1:(train_set + i - 1), ]
+  
+  #Y arima training
+  y_train <- ts(train_slice$y_next, frequency = 24)
+  
+  #x arima training 
+  x_train <- model.matrix(struktur_xreg, data = train_slice)
+
+###AI#############
+# Compute basic stats (variance, min, max) for every column in x_train.
+# This tells us if a dummy variable is "dead" (all values = 0).
+stats <- apply(x_train, 2, function(z) c(var = var(z), min = min(z), max = max(z)))
+
+# Identify columns that are ALWAYS zero.
+# A column is all-zero if:
+#   - variance = 0  (no variation)
+#   - min = 0       (lowest value is 0)
+#   - max = 0       (highest value is 0)
+drop_cols <- names(which(stats["var", ] == 0 &
+                         stats["min", ] == 0 &
+                         stats["max", ] == 0))
+
+# If such columns exist, remove them from x_train.
+# This prevents ARIMA from crashing due to rank-deficient regressors.
+if (length(drop_cols) > 0) {
+  x_train <- x_train[, !(colnames(x_train) %in% drop_cols), drop = FALSE]
+}
+  
+###AI#################
+
+## just copy and paste our previous model but change the y and x
+  
+  temp_model <-  forecast::Arima(
+  y_train,
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x_train , include.mean = FALSE,
+  method = "CSS" #faster runtime <0.5%rmse impact
+) 
+if (i == 1) cat("method used:", temp_model$method, "\n")
+
+
+##AI###
+  test_row <- test[i, , drop = FALSE]
+
+  
+  # Only need to create the x_test model matrix for the test## copy and paste previous code with modifications(switching the name and Data to test_model)
+  
+  x_test <- model.matrix(struktur_xreg, data = test_row)
+  
+# Align x_test to training design###AI###
+miss <- setdiff(colnames(x_train), colnames(x_test))
+if (length(miss) > 0) for (m in miss) x_test <- cbind(x_test, setNames(list(0), m))
+x_test <- x_test[, colnames(x_train), drop = FALSE]
+
+# --- Forecast using the fitted model ---
+fc <- forecast::forecast(temp_model, xreg = x_test, h = 1)
+
+  # store
+  rolling_forecasts[i] <- as.numeric(fc$mean)
+}
+# creating error and calculating rmse and mae
+
+errors<- actuals - rolling_forecasts
+RMSE_sarimax <- sqrt(mean(errors^2))
+MAE_sarimax <- mean(abs(errors))
+
+##saving output#
+saveRDS(
+  list(
+    rolling_forecasts = rolling_forecasts,
+    actuals           = actuals,
+    errors            = errors,
+    RMSE_sarimax      = RMSE_sarimax,
+    MAE_sarimax       = MAE_sarimax
+  ),
+  file = "sarimax_test_results.rds"
+)
 
 ```
 
+```{r}
 
+sarimax_results <- readRDS("sarimax_test_results.rds")
 
+#Benchmark model##
 
+benchmarkmodel <- final_data%>%
+  select(time, Price_NOK, price_lag1, price_lag24, price_lag168)%>%
+  mutate(error_naive_1 = Price_NOK - price_lag1,
+         error_naive_24 = Price_NOK - price_lag24,
+         error_naive_168 = Price_NOK - price_lag168)
+
+#creating the test set from sarimax test_set to align 
+test_bench <- benchmarkmodel[(train_set + 1):nrow(benchmarkmodel), ]
+
+#metrics for the benchmark model##
+
+metrics_lag_1 <- accuracy(test_bench$Price_NOK, test_bench$price_lag1)
+metrics_lag_24 <- accuracy(test_bench$Price_NOK, test_bench$price_lag24)
+metrics_lag_168 <- accuracy(test_bench$Price_NOK, test_bench$price_lag168)
+
+```
 
 ```{r}
-#CHecks 
+#Creating the table for the metrics of all the models
+model <- c("sarimax", "naive1", "snaive24", "snaive168")
 
+RMSE <- c(as.numeric(sarimax_results$RMSE_sarimax), as.numeric(metrics_lag_1[,"RMSE"]), as.numeric(metrics_lag_24[,"RMSE"]), as.numeric(metrics_lag_168[,"RMSE"]))
+
+MAE <- c(as.numeric(sarimax_results$RMSE_sarimax), as.numeric(metrics_lag_1[,"MAE"]), as.numeric(metrics_lag_24[,"MAE"]), as.numeric(metrics_lag_168[,"MAE"]))
+
+metrics_table <- data.frame (model, RMSE, MAE )
+
+#Diebold-mariano test
+
+#Creating the errors for e1 and e2 in diebold test
+error_lag1 <- test_bench$error_naive_1
+
+error_lag24 <- test_bench$error_naive_24
+
+error_lag168 <- test_bench$error_naive_168
+
+error_sarimax <- sarimax_results$errors
+
+#diebold mariano test sarimax vs naive 1
+
+dm_test1_P2 <- dm.test(e1 = error_sarimax, e2 = error_lag1, alternative = "less", h = 1, power = 2)
+#P = 1
+dm_test1_P1 <- dm.test(e1 = error_sarimax, e2 = error_lag1, alternative = "less", h = 1, power = 1)
+
+#sarimax vs snaive 24
+dm_test24_P2 <- dm.test(e1 = error_sarimax, e2 = error_lag24, alternative = "less", h = 1, power = 2)
+#P = 1
+dm_test24_P1 <- dm.test(e1 = error_sarimax, e2 = error_lag24, alternative = "less", h = 1, power = 1)
+
+#sarimax vs snaive 168
+dm_test168_P2 <- dm.test(e1 = error_sarimax, e2 = error_lag168, alternative = "less", h = 1, power = 2)
+#P = 1
+dm_test168_P1 <- dm.test(e1 = error_sarimax, e2 = error_lag168, alternative = "less", h = 1, power = 1)
+
+Diebold_Mariano_Test <- data.frame(
+  naive_1_P2 = dm_test1_P2$p.value,
+  naive_1_P1 = dm_test1_P1$p.value,
+  snavive_24_P2 = dm_test24_P2$p.value,
+  snaive_24_P1 = dm_test24_P1$p.value,
+  snaive_168_P2 = dm_test168_P2$p.value,
+  snaive_168_P1 = dm_test168_P1$p.value
+)
+```
+
+```{r}
+
+forecastPlots <- data.frame(
+  time = test$time,
+  forecast = sarimax_results$rolling_forecasts,
+  actual =  test$Price_NOK,
+  error = sarimax_results$errors
+)
+
+
+series <- c(Actual = "blue", Forecast = "red")
+
+ggplot(forecastPlots, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+
+# since the full plot is cramped up i decided to split into 3 different plots so that it gives better information
+
+plot1 <- forecastPlots %>% 
+  filter(between(time, as.Date('2025-08-28'), as.Date('2025-09-15')))
+##from sep.28 to okt.24
+plot2 <- forecastPlots %>% 
+  filter(between(time, as.Date('2025-09-16'), as.Date('2025-10-04')))
+#plot 3
+plot3 <- forecastPlots %>% 
+  filter(between(time, as.Date('2025-10-5'), as.Date('2025-10-24')))
+
+#plot 1
+
+series <- c(Actual = "blue", Forecast = "red")
+
+ggplot(plot1, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+
+##plot 2
+
+series <- c(Actual = "blue", Forecast = "red")
+
+ggplot(plot2, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+##plot 3
+series <- c(Actual = "blue", Forecast = "red")
+
+ggplot(plot3, aes( x = time)) +
+  geom_line(aes( y = forecast, color = "Forecast"), alpha = 0.8, linewidth = 0.7)+
+  geom_line(aes( y = actual, color = "Actual"), alpha = 0.8, linewidth = 0.7)+
+  ylim (0,2000)+
+  labs(
+    title = "Actual vs. forecast",
+    x = "time",
+    y = "price (NOK/Mwh)"
+    ) + 
+  scale_color_manual("Time series", values = series)+
+  theme_classic()
+
+#histogram plot of the errors using density
+ggplot(forecastPlots, aes(x = error)) +
+  geom_histogram(aes(y = ..density..), binwidth = 20)+
+  labs(
+    title = "Forecast errors",
+    y = "Density",
+    x = "Errors"
+  )
+
+```
+
+```{r}
+#To check which variables increase forecasting accuracy we take simple model and add variables
 
 #simple model
-
-###trying with sarimax because strong autocorrelation in adl model###
 
 final_data <- clean_data_dummies %>%
   mutate(y_next = lead(Price_NOK, 24)) %>%
   drop_na()
 
-#build y and x for the sarimax model#
+#build y and x
 
 y<- ts(final_data$y_next, frequency = 24)
 
-struktur_xreg <- y_next ~ HDH + demand + dummy_hour - 1
+struktur_xreg <- y_next ~ HDH + demand + dummy_hour 
+
 x <- model.matrix(struktur_xreg, data = final_data)
-x <- x[, colnames(x) != "dummy_hour0", drop = FALSE]
-sarimax_simpler <- auto.arima(y, xreg = x, seasonal = TRUE, stepwise = TRUE, approximation = TRUE,
-                              max.p = 3, max.q = 3, max.P = 1, max.Q = 1)
-summary(sarimax_simpler)
+
+sarimax_simple <- forecast::Arima(
+  y, 
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x, include.mean = FALSE
+)
+forecast::checkresiduals(sarimax_simple)
+
+summary(sarimax_simple)
 
 #acf with new model#
 
-acf(residuals(sarimax), lag.max = 168)
+acf(residuals(sarimax_simple), lag.max = 168)
 
-checkresiduals(sarimax)
+###simple model + energy#######
+
+final_data <- clean_data_dummies %>%
+  mutate(y_next = lead(Price_NOK, 24)) %>%
+  drop_na()
+
+#build y and x 
+
+y<- ts(final_data$y_next, frequency = 24)
+
+struktur_xreg <- y_next ~ HDH + demand + dummy_hour + Energy
+
+x <- model.matrix(struktur_xreg, data = final_data)
+
+sarimax_simple_energy <- forecast::Arima(
+  y, 
+  order = c(1,0,1), 
+  seasonal = list(order = c(1,0,1), period = 24),
+  xreg = x, include.mean = FALSE
+)
+forecast::checkresiduals(sarimax_simple_energy)
+
+summary(sarimax_simple_energy)
+
+#acf with new model#
+
+acf(residuals(sarimax_simple_energy), lag.max = 168)
+
+
+
 
 ```
-
-
-
-
