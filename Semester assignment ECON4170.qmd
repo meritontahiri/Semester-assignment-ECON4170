@@ -233,6 +233,8 @@ write.csv(clean_data_dummies,"output/data/clean_data_dummies.csv")
 ```
 
 ```{r}
+# Don't need to run this as the correct lags are manually put in later. It takes about 5 min to run
+
 ############################AI chunk#########################
 ###################################################################
 ##################################################################
@@ -428,6 +430,8 @@ sink()  # returns output to the console
 ```
 
 ```{r}
+#This takes 5 min to run 
+
 ###trying with sarimax because strong autocorrelation in adl model###
 
 final_data <- clean_data_dummies %>%
@@ -485,7 +489,6 @@ sink()  # returns output to the console
 \
 
 ```{r}
-
 ##creating train and test splits#
 
 # Determine row to split
@@ -501,6 +504,11 @@ test <- final_data[(train_set + 1):nrow(final_data), ]
 
 rolling_forecasts <- numeric(nrow(test))
 actuals <- test$y_next
+```
+
+
+```{r}
+#This takes 3 hours to run but the data is saved and later used so no need to re RUN
 
 ## creating the loop with help of AI and reusing previous data##
 for (i in seq_len(nrow(test))) {
@@ -585,6 +593,7 @@ saveRDS(
 
 ```
 
+
 ```{r}
 
 sarimax_results <- readRDS("sarimax_test_results.rds")
@@ -620,7 +629,7 @@ MAE <- c(as.numeric(sarimax_results$RMSE_sarimax), as.numeric(metrics_lag_1[,"MA
 
 Error_sarimax <- sarimax_results$errors
 
-write.csv(error_sarimax,"output/tables/error_sarimax.csv")
+write.csv(Error_sarimax,"output/tables/error_sarimax.csv")
 
 metrics_table <- data.frame (model, RMSE, MAE )
 
@@ -781,6 +790,8 @@ ggsave(filename = "output/figures/error_density.png", plot = error_density)
 ```
 
 ```{r}
+##This takes about 10 min runs the tables are saved in outpt folder
+
 #To check which variables increase forecasting accuracy we take simple model and add variables
 
 #simple model
