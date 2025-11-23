@@ -2,30 +2,33 @@ Series: y
 Regression with ARIMA(1,0,1)(1,0,1)[24] errors 
 
 Coefficients:
-         ar1     ma1     sar1    sma1  (Intercept)  price_lag24     HDH  demand  Energy
-      0.8762  0.1542  -0.3636  0.5494      56.9511       0.1846  9.9952  0.1232  -1e-04
-s.e.  0.0066  0.0132   0.0551  0.0528     180.3726       0.0164  2.7360  0.0185   0e+00
-      dummy_hour1  dummy_hour2  dummy_hour3  dummy_hour4  dummy_hour5  dummy_hour6  dummy_hour7
-         -34.9059     -40.1634     -62.1651     -75.6841     -81.9371     -75.7663     -35.3059
-s.e.       8.6287      13.2906      16.5015      18.7758      20.1494      20.6442      20.1628
-      dummy_hour8  dummy_hour9  dummy_hour10  dummy_hour11  dummy_hour12  dummy_hour13
-          44.9918     100.7804       81.4315       19.8996      -28.5072      -75.9795
-s.e.      19.8051      20.8323       21.9333       22.7714       23.3846       23.7876
-      dummy_hour14  dummy_hour15  dummy_hour16  dummy_hour17  dummy_hour18  dummy_hour19
-         -115.3163      -134.539     -116.4623      -69.4886      -14.8907       40.4088
-s.e.       23.8343        23.614       22.9293       22.0887       21.0522       19.5231
-      dummy_hour20  dummy_hour21  dummy_hour22  dummy_hour23  dummy_weekday2  dummy_weekday3
-           68.2995       73.1153       77.0316       40.8931        -11.0923        -50.1096
-s.e.       17.6718       15.4556       12.6100        8.4113         16.0773         21.7141
-      dummy_weekday4  dummy_weekday5  dummy_weekday6  dummy_weekday7  dummy_month2  dummy_month3
-            -68.6054        -90.8368        -66.8836        -24.2083      -13.5347     -106.4663
-s.e.         23.2622         23.6028         22.0213         16.0935       68.8706       92.8255
-      dummy_month4  dummy_month5  dummy_month6  dummy_month7  dummy_month8  dummy_month9
-           22.0925      263.2264      268.2549      319.3653      436.4457      313.0742
-s.e.       99.6100       85.7607       81.1906       87.9517       89.5963       94.3682
-      dummy_month10
-           212.8492
-s.e.        96.3153
+         ar1     ma1     sar1    sma1  (Intercept)  price_lag24     HDH  demand
+      0.8762  0.1542  -0.3636  0.5494      56.9511       0.1846  9.9952  0.1232
+s.e.  0.0066  0.0132   0.0551  0.0528     180.3726       0.0164  2.7360  0.0185
+      Energy  dummy_hour1  dummy_hour2  dummy_hour3  dummy_hour4  dummy_hour5
+      -1e-04     -34.9059     -40.1634     -62.1651     -75.6841     -81.9371
+s.e.   0e+00       8.6287      13.2906      16.5015      18.7758      20.1494
+      dummy_hour6  dummy_hour7  dummy_hour8  dummy_hour9  dummy_hour10  dummy_hour11
+         -75.7663     -35.3059      44.9918     100.7804       81.4315       19.8996
+s.e.      20.6442      20.1628      19.8051      20.8323       21.9333       22.7714
+      dummy_hour12  dummy_hour13  dummy_hour14  dummy_hour15  dummy_hour16
+          -28.5072      -75.9795     -115.3163      -134.539     -116.4623
+s.e.       23.3846       23.7876       23.8343        23.614       22.9293
+      dummy_hour17  dummy_hour18  dummy_hour19  dummy_hour20  dummy_hour21
+          -69.4886      -14.8907       40.4088       68.2995       73.1153
+s.e.       22.0887       21.0522       19.5231       17.6718       15.4556
+      dummy_hour22  dummy_hour23  dummy_weekday2  dummy_weekday3  dummy_weekday4
+           77.0316       40.8931        -11.0923        -50.1096        -68.6054
+s.e.       12.6100        8.4113         16.0773         21.7141         23.2622
+      dummy_weekday5  dummy_weekday6  dummy_weekday7  dummy_month2  dummy_month3
+            -90.8368        -66.8836        -24.2083      -13.5347     -106.4663
+s.e.         23.6028         22.0213         16.0935       68.8706       92.8255
+      dummy_month4  dummy_month5  dummy_month6  dummy_month7  dummy_month8
+           22.0925      263.2264      268.2549      319.3653      436.4457
+s.e.       99.6100       85.7607       81.1906       87.9517       89.5963
+      dummy_month9  dummy_month10
+          313.0742       212.8492
+s.e.       94.3682        96.3153
 
 sigma^2 = 13459:  log likelihood = -42914.76
 AIC=85925.52   AICc=85926.2   BIC=86254.19
